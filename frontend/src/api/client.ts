@@ -1,5 +1,6 @@
 import type {
   Account,
+  AccountCoverage,
   Category,
   ConfirmResponse,
   DashboardSummary,
@@ -43,6 +44,11 @@ export async function confirmImport(importId: number): Promise<ConfirmResponse> 
 // Statement imports
 export async function getStatements(): Promise<StatementImport[]> {
   return fetchJSON('/statements');
+}
+
+// Statement coverage
+export async function getStatementCoverage(): Promise<AccountCoverage[]> {
+  return fetchJSON('/statements/coverage');
 }
 
 // Transactions

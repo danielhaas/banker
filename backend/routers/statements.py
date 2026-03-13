@@ -1,17 +1,18 @@
 import logging
 import shutil
 import tempfile
+from datetime import date
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from backend.database import get_db
-from backend.models import StatementImport, Account, Bank
-from backend.schemas.statement import ConfirmRequest, ConfirmResponse, StatementImportOut, UploadResponse
+from backend.models import StatementImport, Account, Bank, Transaction
+from backend.schemas.statement import AccountCoverage, ConfirmRequest, ConfirmResponse, StatementImportOut, UploadResponse
 from backend.services.import_service import (
     _db_write_lock,
     confirm_import,
@@ -150,3 +151,68 @@ async def confirm(req: ConfirmRequest, db: AsyncSession = Depends(get_db)):
         transaction_count=count,
         status=result["status"],
     )
+
+
+@router.get("/coverage", response_model=list[AccountCoverage])
+async def statement_coverage(db: AsyncSession = Depends(get_db)):
+    """For each account, show which months have statements and which are missing."""
+    # Get distinct year-months per account from transactions
+    result = await db.execute(
+        select(
+            Transaction.account_id,
+            func.strftime("%Y-%m", Transaction.date).label("month"),
+        )
+        .where(Transaction.statement_import_id.is_not(None))
+        .group_by(Transaction.account_id, "month")
+    )
+    # Build {account_id: set of months}
+    account_months: dict[int, set[str]] = {}
+    for row in result.all():
+        account_months.setdefault(row.account_id, set()).add(row.month)
+
+    if not account_months:
+        return []
+
+    # Load accounts with bank info
+    acct_result = await db.execute(
+        select(Account)
+        .options(joinedload(Account.bank))
+        .where(Account.id.in_(account_months.keys()))
+    )
+    accounts = {a.id: a for a in acct_result.scalars().unique().all()}
+
+    coverages = []
+    for account_id, months in account_months.items():
+        acct = accounts.get(account_id)
+        if not acct:
+            continue
+
+        sorted_months = sorted(months)
+        first = sorted_months[0]
+        last = sorted_months[-1]
+
+        # Generate all months in range
+        fy, fm = int(first[:4]), int(first[5:7])
+        ly, lm = int(last[:4]), int(last[5:7])
+        all_months = []
+        y, m = fy, fm
+        while (y, m) <= (ly, lm):
+            all_months.append(f"{y:04d}-{m:02d}")
+            m += 1
+            if m > 12:
+                m = 1
+                y += 1
+
+        missing = [mo for mo in all_months if mo not in months]
+
+        coverages.append(AccountCoverage(
+            account_id=account_id,
+            account_name=acct.name,
+            bank_name=acct.bank.name if acct.bank else acct.account_number or "",
+            months_present=sorted_months,
+            months_missing=missing,
+            first_month=first,
+            last_month=last,
+        ))
+
+    return sorted(coverages, key=lambda c: c.account_name)

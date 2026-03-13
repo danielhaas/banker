@@ -8,6 +8,13 @@ export function useStatements() {
   });
 }
 
+export function useStatementCoverage() {
+  return useQuery({
+    queryKey: ['statement-coverage'],
+    queryFn: api.getStatementCoverage,
+  });
+}
+
 export function useTransactions(params?: Parameters<typeof api.getTransactions>[0]) {
   return useQuery({
     queryKey: ['transactions', params],

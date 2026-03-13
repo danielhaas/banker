@@ -92,3 +92,13 @@ export interface StatementImport {
   stored_path: string | null;
   created_at: string;
 }
+
+export interface AccountCoverage {
+  account_id: number;
+  account_name: string;
+  bank_name: string;
+  months_present: string[];
+  months_missing: string[];
+  first_month: string;
+  last_month: string;
+}
