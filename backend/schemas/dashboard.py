@@ -6,6 +6,8 @@ from pydantic import BaseModel
 class AccountBalance(BaseModel):
     account_id: int
     account_name: str
+    account_number: str | None
+    account_type: str
     bank_name: str
     currency: str
     balance: Decimal

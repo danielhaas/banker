@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pdfplumber
 
-from backend.parsers.base import BankStatementParser, ParsedStatement, ParsedTransaction
+from backend.parsers.base import BankStatementParser, ParsedStatement, ParsedSubAccount, ParsedTransaction
 from backend.parsers.registry import register
 
 # Keywords that identify each template
@@ -209,9 +209,20 @@ def _parse_credit_card(full_text: str, statement_date: date, currency: str) -> l
     return transactions
 
 
-def _parse_premier_statement(pdf_path: Path, statement_date: date) -> list[ParsedTransaction]:
-    """Parse HSBC Premier account statement using word positions for column detection."""
-    transactions: list[ParsedTransaction] = []
+_SECTION_MAP = {
+    "HKD Savings": ("HKD Savings", "savings", "HKD"),
+    "HKD Current": ("HKD Current", "checking", "HKD"),
+    "Foreign Currency Savings": ("Foreign Currency Savings", "savings", None),  # currency set per-line
+}
+
+
+def _parse_premier_statement(pdf_path: Path, statement_date: date) -> dict[str, list[ParsedTransaction]]:
+    """Parse HSBC Premier account statement using word positions for column detection.
+
+    Returns a dict mapping section name -> list of transactions.
+    """
+    # section_name -> transactions
+    sections: dict[str, list[ParsedTransaction]] = {}
     year = statement_date.year
 
     # Amount pattern: digits with optional commas and exactly 2 decimal places
@@ -251,18 +262,18 @@ def _parse_premier_statement(pdf_path: Path, statement_date: date) -> list[Parse
                 lines.setdefault(top, []).append(w)
 
             in_transaction_section = False
+            current_section: str | None = None
             current_section_currency = "HKD"
             current_date: date | None = None
-            # Accumulate description lines until we hit an amount
             desc_acc: list[str] = []
 
             def emit(amt: Decimal, direction: str, bal: Decimal | None):
                 """Create a transaction from accumulated description + amount."""
                 desc = " ".join(desc_acc).strip()
-                if not desc or desc.startswith("B/F BALANCE"):
+                if not desc or desc.startswith("B/F BALANCE") or current_section is None:
                     return
                 signed = amt if direction == "deposit" else -amt
-                transactions.append(ParsedTransaction(
+                sections.setdefault(current_section, []).append(ParsedTransaction(
                     date=current_date,  # type: ignore[arg-type]
                     description=desc,
                     amount=signed,
@@ -275,17 +286,22 @@ def _parse_premier_statement(pdf_path: Path, statement_date: date) -> list[Parse
                 full_line = " ".join(w["text"] for w in line_words)
 
                 # Detect section headers
-                if "HKD Savings" in full_line or "HKD Current" in full_line:
+                matched_section = None
+                for key in _SECTION_MAP:
+                    if key in full_line:
+                        matched_section = key
+                        break
+
+                if matched_section:
                     current_date = None
                     desc_acc = []
                     in_transaction_section = True
-                    current_section_currency = "HKD"
+                    current_section = matched_section
+                    _, _, ccy = _SECTION_MAP[matched_section]
+                    if ccy:
+                        current_section_currency = ccy
                     continue
-                if "Foreign Currency Savings" in full_line:
-                    current_date = None
-                    desc_acc = []
-                    in_transaction_section = True
-                    continue
+
                 # Skip column headers
                 if full_line.startswith("CCY Date") or full_line.startswith("Date Transaction"):
                     continue
@@ -318,7 +334,7 @@ def _parse_premier_statement(pdf_path: Path, statement_date: date) -> list[Parse
                     if parsed_date and parsed_date > statement_date:
                         parsed_date = parsed_date.replace(year=year - 1)
                     current_date = parsed_date
-                    desc_acc = []  # new date group — reset description
+                    desc_acc = []
                     remaining = line_words[2:]
                 else:
                     remaining = line_words
@@ -348,16 +364,14 @@ def _parse_premier_statement(pdf_path: Path, statement_date: date) -> list[Parse
                 line_desc = " ".join(line_desc_parts).strip()
 
                 if line_amount is not None:
-                    # Line has an amount — emit transaction with accumulated desc
                     if line_desc:
                         desc_acc.append(line_desc)
                     emit(line_amount, line_direction, line_balance)
-                    desc_acc = []  # reset for next transaction
+                    desc_acc = []
                 elif line_desc:
-                    # Description-only line — accumulate
                     desc_acc.append(line_desc)
 
-    return transactions
+    return sections
 
 
 @register
@@ -403,13 +417,36 @@ class HSBCHKParser(BankStatementParser):
             account_type = "checking"
             if statement_date is None:
                 statement_date = date(year, 12, 31)
-            transactions = _parse_premier_statement(file_path, statement_date)
+            section_txns = _parse_premier_statement(file_path, statement_date)
+            # Determine account prefix: "PIA" for Personal Integrated Account, else plain
+            is_pia = "Personal Integrated Account" in full_text
+            prefix = "PIA " if is_pia else ""
+            # Build sub-accounts from sections
+            sub_accounts = []
+            all_transactions = []
+            for section_name, txns in section_txns.items():
+                if not txns:
+                    continue
+                acct_name, acct_type, ccy = _SECTION_MAP.get(
+                    section_name, (section_name, "savings", "HKD")
+                )
+                # For foreign currency, use the currency from the transactions
+                if ccy is None and txns:
+                    ccy = txns[0].currency
+                sub_accounts.append(ParsedSubAccount(
+                    account_name=f"{prefix}{acct_name}",
+                    account_type=acct_type,
+                    currency=ccy or "HKD",
+                    transactions=txns,
+                ))
+                all_transactions.extend(txns)
+            transactions = all_transactions
         else:
             account_number = _extract_account_number(full_text)
             account_type = "checking"
             transactions = _parse_bank_statement(full_text, year, currency)
 
-        return ParsedStatement(
+        result = ParsedStatement(
             bank_code=self.bank_code,
             account_number=account_number,
             account_name=None,
@@ -418,3 +455,6 @@ class HSBCHKParser(BankStatementParser):
             account_type=account_type,
             transactions=transactions,
         )
+        if template == "premier_statement":
+            result.sub_accounts = sub_accounts
+        return result

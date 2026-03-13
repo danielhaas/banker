@@ -41,6 +41,8 @@ async def summary(db: AsyncSession = Depends(get_db)):
             AccountBalance(
                 account_id=account.id,
                 account_name=account.name,
+                account_number=account.account_number,
+                account_type=account.account_type,
                 bank_name=bank.name,
                 currency=account.currency,
                 balance=balance,

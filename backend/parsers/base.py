@@ -15,6 +15,15 @@ class ParsedTransaction:
 
 
 @dataclass
+class ParsedSubAccount:
+    """A sub-account within a multi-account statement (e.g. premier statement)."""
+    account_name: str
+    account_type: str  # checking, savings, credit_card
+    currency: str
+    transactions: list[ParsedTransaction] = field(default_factory=list)
+
+
+@dataclass
 class ParsedStatement:
     bank_code: str
     account_number: str | None
@@ -23,6 +32,7 @@ class ParsedStatement:
     template: str = ""  # e.g. "bank_statement", "credit_card"
     account_type: str = "checking"  # checking, savings, credit_card
     transactions: list[ParsedTransaction] = field(default_factory=list)
+    sub_accounts: list[ParsedSubAccount] = field(default_factory=list)
 
 
 class BankStatementParser(ABC):

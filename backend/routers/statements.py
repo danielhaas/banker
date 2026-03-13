@@ -137,7 +137,8 @@ async def confirm(req: ConfirmRequest, db: AsyncSession = Depends(get_db)):
         )
         async with _db_write_lock:
             count = await create_transactions_from_preview(
-                db, req.import_id, cached["account_id"], cached["transactions"]
+                db, req.import_id, cached["account_id"], cached["transactions"],
+                sub_accounts=cached.get("sub_accounts"),
             )
             result = await confirm_import(db, req.import_id, stored_path)
             await db.commit()

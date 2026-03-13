@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.config import settings
 from backend.models import Account, Bank, StatementImport, Transaction
 from backend.parsers import registry
-from backend.parsers.base import ParsedStatement
+from backend.parsers.base import ParsedStatement, ParsedSubAccount
 
 logger = logging.getLogger(__name__)
 
@@ -29,24 +29,34 @@ async def get_or_create_bank(db: AsyncSession, bank_code: str, bank_name: str, c
 
 
 async def get_or_create_account(
-    db: AsyncSession, bank_id: int, parsed: ParsedStatement
+    db: AsyncSession, bank_id: int, parsed: ParsedStatement,
+    *, sub: ParsedSubAccount | None = None,
 ) -> Account:
+    """Find or create an account. If sub is provided, use its name/type/currency."""
+    account_type = sub.account_type if sub else parsed.account_type
+    currency = sub.currency if sub else parsed.currency
+    account_name = sub.account_name if sub else parsed.account_name
+
     stmt = select(Account).where(
         Account.bank_id == bank_id,
-        Account.account_type == parsed.account_type,
+        Account.account_type == account_type,
+        Account.currency == currency,
     )
     if parsed.account_number:
         stmt = stmt.where(Account.account_number == parsed.account_number)
+    if account_name:
+        stmt = stmt.where(Account.name == account_name)
     result = await db.execute(stmt)
     account = result.scalars().first()
     if account is None:
-        default_name = f"{parsed.bank_code} {'Credit Card' if parsed.account_type == 'credit_card' else 'Account'}"
+        if not account_name:
+            account_name = f"{parsed.bank_code} {'Credit Card' if account_type == 'credit_card' else 'Account'}"
         account = Account(
             bank_id=bank_id,
-            name=parsed.account_name or default_name,
+            name=account_name,
             account_number=parsed.account_number,
-            currency=parsed.currency,
-            account_type=parsed.account_type,
+            currency=currency,
+            account_type=account_type,
         )
         db.add(account)
         await db.flush()
@@ -143,10 +153,35 @@ async def upload_statement(db: AsyncSession, file_path: Path, filename: str) -> 
             logger.debug("cleanup_pending failed, continuing", exc_info=True)
 
         bank = await get_or_create_bank(db, parser.bank_code, parser.bank_name, parser.country)
-        account = await get_or_create_account(db, bank.id, parsed)
+
+        # For multi-account statements, create accounts per sub-account
+        # and track which transactions go to which account
+        sub_account_map: list[dict] = []  # [{account_id, transactions}]
+        if parsed.sub_accounts:
+            for sub in parsed.sub_accounts:
+                account = await get_or_create_account(db, bank.id, parsed, sub=sub)
+                sub_account_map.append({
+                    "account_id": account.id,
+                    "account_name": sub.account_name,
+                    "transactions": [
+                        {
+                            "date": t.date,
+                            "description": t.description,
+                            "amount": t.amount,
+                            "currency": t.currency,
+                            "balance_after": t.balance_after,
+                        }
+                        for t in sub.transactions
+                    ],
+                })
+            # Use first sub-account as the "primary" for statement_import
+            primary_account_id = sub_account_map[0]["account_id"] if sub_account_map else 0
+        else:
+            account = await get_or_create_account(db, bank.id, parsed)
+            primary_account_id = account.id
 
         statement_import = StatementImport(
-            account_id=account.id,
+            account_id=primary_account_id,
             filename=filename,
             file_hash=file_hash,
             bank_code=parser.bank_code,
@@ -157,24 +192,27 @@ async def upload_statement(db: AsyncSession, file_path: Path, filename: str) -> 
         await db.flush()
         await db.commit()
 
+    all_transactions = [
+        {
+            "date": t.date,
+            "description": t.description,
+            "amount": t.amount,
+            "currency": t.currency,
+            "balance_after": t.balance_after,
+        }
+        for t in parsed.transactions
+    ]
+
     return {
         "duplicate": False,
         "import_id": statement_import.id,
-        "account_id": account.id,
+        "account_id": primary_account_id,
         "bank_code": parser.bank_code,
         "template": parsed.template,
         "file_hash": file_hash,
         "filename": filename,
-        "transactions": [
-            {
-                "date": t.date,
-                "description": t.description,
-                "amount": t.amount,
-                "currency": t.currency,
-                "balance_after": t.balance_after,
-            }
-            for t in parsed.transactions
-        ],
+        "transactions": all_transactions,
+        "sub_accounts": sub_account_map if sub_account_map else None,
     }
 
 
@@ -200,21 +238,41 @@ async def confirm_import(db: AsyncSession, import_id: int, stored_path: str) -> 
 
 
 async def create_transactions_from_preview(
-    db: AsyncSession, import_id: int, account_id: int, transactions: list[dict]
+    db: AsyncSession, import_id: int, account_id: int, transactions: list[dict],
+    sub_accounts: list[dict] | None = None,
 ) -> int:
-    """Create transaction records from preview data."""
+    """Create transaction records from preview data.
+
+    If sub_accounts is provided, each entry has account_id + transactions.
+    Otherwise, all transactions go to the single account_id.
+    """
     count = 0
-    for t in transactions:
-        txn = Transaction(
-            account_id=account_id,
-            date=t["date"],
-            description=t["description"],
-            amount=t["amount"],
-            currency=t["currency"],
-            balance_after=t.get("balance_after"),
-            statement_import_id=import_id,
-        )
-        db.add(txn)
-        count += 1
+    if sub_accounts:
+        for sub in sub_accounts:
+            for t in sub["transactions"]:
+                txn = Transaction(
+                    account_id=sub["account_id"],
+                    date=t["date"],
+                    description=t["description"],
+                    amount=t["amount"],
+                    currency=t["currency"],
+                    balance_after=t.get("balance_after"),
+                    statement_import_id=import_id,
+                )
+                db.add(txn)
+                count += 1
+    else:
+        for t in transactions:
+            txn = Transaction(
+                account_id=account_id,
+                date=t["date"],
+                description=t["description"],
+                amount=t["amount"],
+                currency=t["currency"],
+                balance_after=t.get("balance_after"),
+                statement_import_id=import_id,
+            )
+            db.add(txn)
+            count += 1
     await db.flush()
     return count

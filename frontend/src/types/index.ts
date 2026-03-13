@@ -64,6 +64,8 @@ export interface ConfirmResponse {
 export interface AccountBalance {
   account_id: number;
   account_name: string;
+  account_number: string | null;
+  account_type: string;
   bank_name: string;
   currency: string;
   balance: number;

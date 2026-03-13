@@ -28,8 +28,16 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {summary.balances.map((b) => (
             <div key={b.account_id} className="bg-white rounded-lg border p-4">
-              <p className="text-sm text-gray-500">{b.bank_name}</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-gray-500">{b.bank_name}</p>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 capitalize">
+                  {b.account_type.replace('_', ' ')}
+                </span>
+              </div>
               <p className="font-medium text-gray-900">{b.account_name}</p>
+              {b.account_number && (
+                <p className="text-xs text-gray-400">{b.account_number}</p>
+              )}
               <p className="text-xl font-bold mt-1">
                 {b.currency} {Number(b.balance).toLocaleString('en-HK', { minimumFractionDigits: 2 })}
               </p>
