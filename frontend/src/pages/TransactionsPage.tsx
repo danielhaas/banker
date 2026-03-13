@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useTransactions, useCategories, useAccounts, useUpdateTransaction, useDetectTransfers, useDeduplicateTransactions } from '../hooks/useApi';
+import { useTransactions, useCategories, useAccounts, useUpdateTransaction, useDetectTransfers, useDeduplicateTransactions, useBulkCategorize } from '../hooks/useApi';
 
 type SortKey = 'date' | 'description' | 'amount' | 'balance_after' | 'category';
 type SortDir = 'asc' | 'desc';
@@ -18,6 +18,8 @@ export default function TransactionsPage() {
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [page, setPage] = useState(0);
   const pageSize = 200;
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const bulkCategorize = useBulkCategorize();
   const deduplicate = useDeduplicateTransactions();
   const { data: transactions, isLoading } = useTransactions({
     account_id: accountId,
@@ -178,6 +180,44 @@ export default function TransactionsPage() {
         </div>
       </div>
 
+      {selected.size > 0 && (
+        <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
+          <span className="text-sm font-medium text-blue-700">{selected.size} selected</span>
+          <select
+            defaultValue=""
+            onChange={(e) => {
+              if (!e.target.value) return;
+              bulkCategorize.mutate(
+                { transaction_ids: [...selected], category_id: Number(e.target.value) },
+                { onSuccess: () => setSelected(new Set()) },
+              );
+              e.target.value = '';
+            }}
+            className="border rounded-lg px-3 py-1.5 text-sm"
+          >
+            <option value="">Assign category...</option>
+            {parentCategories.map((cat) => (
+              <optgroup key={cat.id} label={`${cat.icon ?? ''} ${cat.name}`}>
+                {categories
+                  ?.filter((c) => c.parent_id === cat.id)
+                  .map((child) => (
+                    <option key={child.id} value={child.id}>
+                      {child.icon ?? ''} {child.name}
+                    </option>
+                  ))}
+                <option value={cat.id}>{cat.name} (General)</option>
+              </optgroup>
+            ))}
+          </select>
+          <button
+            onClick={() => setSelected(new Set())}
+            className="text-sm text-gray-500 hover:text-gray-700"
+          >
+            Clear selection
+          </button>
+        </div>
+      )}
+
       {isLoading ? (
         <p className="text-gray-500">Loading...</p>
       ) : !pageTransactions?.length ? (
@@ -188,6 +228,20 @@ export default function TransactionsPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 text-left">
               <tr>
+                <th className="px-2 py-3 w-8">
+                  <input
+                    type="checkbox"
+                    checked={displayTransactions.length > 0 && displayTransactions.every((t) => selected.has(t.id))}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelected(new Set(displayTransactions.map((t) => t.id)));
+                      } else {
+                        setSelected(new Set());
+                      }
+                    }}
+                    className="rounded"
+                  />
+                </th>
                 <th className="px-4 py-3 font-medium cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort('date')}>Date{sortIndicator('date')}</th>
                 <th className="px-4 py-3 font-medium cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort('description')}>Description{sortIndicator('description')}</th>
                 <th className="px-4 py-3 font-medium text-right cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort('amount')}>Amount{sortIndicator('amount')}</th>
@@ -197,7 +251,19 @@ export default function TransactionsPage() {
             </thead>
             <tbody className="divide-y">
               {displayTransactions.map((txn) => (
-                <tr key={txn.id} className="hover:bg-gray-50">
+                <tr key={txn.id} className={`hover:bg-gray-50 ${selected.has(txn.id) ? 'bg-blue-50' : ''}`}>
+                  <td className="px-2 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(txn.id)}
+                      onChange={(e) => {
+                        const next = new Set(selected);
+                        if (e.target.checked) next.add(txn.id); else next.delete(txn.id);
+                        setSelected(next);
+                      }}
+                      className="rounded"
+                    />
+                  </td>
                   <td className="px-4 py-3 whitespace-nowrap">{txn.date}</td>
                   <td className="px-4 py-3">
                     <button

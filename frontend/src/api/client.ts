@@ -87,6 +87,15 @@ export async function updateTransaction(
   });
 }
 
+// Bulk categorize
+export async function bulkCategorize(data: { transaction_ids: number[]; category_id: number }): Promise<{ updated: number }> {
+  return fetchJSON('/transactions/bulk-categorize', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
 // Deduplication
 export async function deduplicateTransactions(): Promise<{ deleted: number }> {
   return fetchJSON('/transactions/deduplicate', { method: 'POST' });

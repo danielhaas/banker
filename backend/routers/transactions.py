@@ -83,6 +83,35 @@ async def list_transactions(
     ]
 
 
+class BulkCategoryUpdate(BaseModel):
+    transaction_ids: list[int]
+    category_id: int
+
+
+class BulkUpdateResponse(BaseModel):
+    updated: int
+
+
+@router.post("/bulk-categorize", response_model=BulkUpdateResponse)
+async def bulk_categorize(data: BulkCategoryUpdate, db: AsyncSession = Depends(get_db)):
+    """Assign a category to multiple transactions at once."""
+    if not data.transaction_ids:
+        return BulkUpdateResponse(updated=0)
+
+    result = await db.execute(
+        select(Transaction).where(Transaction.id.in_(data.transaction_ids))
+    )
+    txns = result.scalars().all()
+
+    for txn in txns:
+        txn.category_id = data.category_id
+        txn.category_source = "manual"
+        txn.category_confidence = 1.0
+
+    await db.commit()
+    return BulkUpdateResponse(updated=len(txns))
+
+
 @router.get("/export")
 async def export_transactions(
     account_id: int | None = None,

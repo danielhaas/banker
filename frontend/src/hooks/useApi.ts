@@ -75,6 +75,17 @@ export function useConfirmImport() {
   });
 }
 
+export function useBulkCategorize() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.bulkCategorize,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['transactions'] });
+      qc.invalidateQueries({ queryKey: ['spending'] });
+    },
+  });
+}
+
 export function useDeduplicateTransactions() {
   const qc = useQueryClient();
   return useMutation({
