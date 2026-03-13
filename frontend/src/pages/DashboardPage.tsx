@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useMemo } from 'react';
 import { useAccounts, useDashboardSummary, useMonthlyFlow, useSpending } from '../hooks/useApi';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, ReferenceLine } from 'recharts';
 import type { AccountBalance } from '../types';
 
 const COLORS = ['#ef4444', '#3b82f6', '#ec4899', '#f59e0b', '#a855f7', '#10b981', '#6b7280', '#14b8a6'];
@@ -45,6 +46,29 @@ export default function DashboardPage() {
   const [flowAccountId, setFlowAccountId] = useState<number | undefined>(undefined);
   const { data: monthlyFlow } = useMonthlyFlow({ account_id: flowAccountId, ...dateParams });
 
+  const taxesTotal = useMemo(() => {
+    if (!spending) return 0;
+    const taxes = spending.find((s) => s.category_name === 'Taxes');
+    return taxes ? Number(taxes.total) : 0;
+  }, [spending]);
+
+  const monthlyAverages = useMemo(() => {
+    if (!monthlyFlow?.length) return null;
+    const months = monthlyFlow.length;
+    const avgIncome = monthlyFlow.reduce((s, m) => s + Number(m.income), 0) / months;
+    const avgExpense = monthlyFlow.reduce((s, m) => s + Number(m.expense), 0) / months;
+    const avgExpenseExTax = avgExpense - taxesTotal / months;
+    return { avgIncome, avgExpense, avgExpenseExTax, avgNet: avgIncome - avgExpense, avgNetExTax: avgIncome - avgExpenseExTax, months };
+  }, [monthlyFlow, taxesTotal]);
+
+  const spendingWithAvg = useMemo(() => {
+    if (!spending?.length || !monthlyAverages) return null;
+    return spending.map((s) => ({
+      ...s,
+      monthly_avg: Number(s.total) / monthlyAverages.months,
+    }));
+  }, [spending, monthlyAverages]);
+
   if (summaryLoading) return <p className="text-gray-500">Loading...</p>;
 
   return (
@@ -76,6 +100,40 @@ export default function DashboardPage() {
           <p className="text-3xl font-bold text-gray-900">
             ${Number(summary.net_worth_hkd).toLocaleString('en-HK', { minimumFractionDigits: 2 })}
           </p>
+        </div>
+      )}
+
+      {/* Monthly Averages */}
+      {monthlyAverages && (
+        <div className="grid grid-cols-3 gap-4">
+          <div className="bg-white rounded-lg border p-4">
+            <p className="text-sm text-gray-500">Avg Monthly Income</p>
+            <p className="text-xl font-bold text-green-600">
+              ${monthlyAverages.avgIncome.toLocaleString('en-HK', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+            </p>
+          </div>
+          <div className="bg-white rounded-lg border p-4">
+            <p className="text-sm text-gray-500">Avg Monthly Expense</p>
+            <p className="text-xl font-bold text-red-600">
+              ${monthlyAverages.avgExpense.toLocaleString('en-HK', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+            </p>
+            {taxesTotal > 0 && (
+              <p className="text-sm text-gray-400 mt-1">
+                ${monthlyAverages.avgExpenseExTax.toLocaleString('en-HK', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} excl. taxes
+              </p>
+            )}
+          </div>
+          <div className="bg-white rounded-lg border p-4">
+            <p className="text-sm text-gray-500">Avg Monthly Savings</p>
+            <p className={`text-xl font-bold ${monthlyAverages.avgNet >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              ${monthlyAverages.avgNet.toLocaleString('en-HK', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+            </p>
+            {taxesTotal > 0 && (
+              <p className={`text-sm mt-1 ${monthlyAverages.avgNetExTax >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                ${monthlyAverages.avgNetExTax.toLocaleString('en-HK', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} excl. taxes
+              </p>
+            )}
+          </div>
         </div>
       )}
 
@@ -154,6 +212,9 @@ export default function DashboardPage() {
                 <Legend />
                 <Bar dataKey="income" name="Income" fill="#10b981" />
                 <Bar dataKey="expense" name="Expense" fill="#ef4444" />
+                {monthlyAverages && (
+                  <ReferenceLine y={monthlyAverages.avgExpense} stroke="#ef4444" strokeDasharray="6 3" label={{ value: 'Avg Expense', position: 'right', fontSize: 11, fill: '#ef4444' }} />
+                )}
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -196,7 +257,7 @@ export default function DashboardPage() {
               </ResponsiveContainer>
             </div>
             <div className="flex-1 space-y-2">
-              {spending.map((s, i) => (
+              {(spendingWithAvg ?? spending)?.map((s, i) => (
                 <div
                   key={s.category_name}
                   className="flex items-center justify-between text-sm cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1"
@@ -215,10 +276,17 @@ export default function DashboardPage() {
                     />
                     <span>{s.category_name}</span>
                   </div>
-                  <span className="font-medium">
-                    ${Number(s.total).toLocaleString('en-HK', { minimumFractionDigits: 2 })}
+                  <div className="text-right">
+                    <span className="font-medium">
+                      ${Number(s.total).toLocaleString('en-HK', { minimumFractionDigits: 2 })}
+                    </span>
+                    {'monthly_avg' in s && (
+                      <span className="text-gray-400 text-xs ml-2">
+                        ${(s as { monthly_avg: number }).monthly_avg.toLocaleString('en-HK', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}/mo
+                      </span>
+                    )}
                     <span className="text-gray-400 ml-1">({s.count})</span>
-                  </span>
+                  </div>
                 </div>
               ))}
             </div>
