@@ -1,6 +1,5 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useMemo } from 'react';
 import { useAccounts, useDashboardSummary, useMonthlyFlow, useSpending } from '../hooks/useApi';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, ReferenceLine } from 'recharts';
 import type { AccountBalance } from '../types';
@@ -42,7 +41,22 @@ export default function DashboardPage() {
     start_date: startDate || undefined,
     end_date: endDate || undefined,
   };
-  const { data: spending, isLoading: spendingLoading } = useSpending(dateParams);
+  const { data: spendingRaw, isLoading: spendingLoading } = useSpending(dateParams);
+  const spending = useMemo(() => spendingRaw?.map((s) => ({ ...s, total: Number(s.total) })), [spendingRaw]);
+
+  // Last month date range
+  const lastMonthParams = useMemo(() => {
+    const now = new Date();
+    const y = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+    const m = now.getMonth() === 0 ? 12 : now.getMonth(); // 1-based
+    const start = `${y}-${String(m).padStart(2, '0')}-01`;
+    const lastDay = new Date(y, m, 0).getDate();
+    const end = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+    return { start_date: start, end_date: end, label: `${y}-${String(m).padStart(2, '0')}` };
+  }, []);
+  const { data: lastMonthSpendingRaw } = useSpending({ start_date: lastMonthParams.start_date, end_date: lastMonthParams.end_date });
+  const lastMonthSpending = useMemo(() => lastMonthSpendingRaw?.map((s) => ({ ...s, total: Number(s.total) })), [lastMonthSpendingRaw]);
+
   const [flowAccountId, setFlowAccountId] = useState<number | undefined>(undefined);
   const { data: monthlyFlow } = useMonthlyFlow({ account_id: flowAccountId, ...dateParams });
 
@@ -221,78 +235,143 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Spending by Category */}
-      {!spendingLoading && spending && spending.length > 0 && (
-        <div className="bg-white rounded-lg border p-6">
-          <h2 className="text-lg font-semibold mb-4">Spending by Category</h2>
-          <div className="flex items-center gap-8">
-            <div className="w-64 h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={spending}
-                    dataKey="total"
-                    nameKey="category_name"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={100}
-                    style={{ cursor: 'pointer' }}
-                    onClick={(_, index) => {
-                      const s = spending[index];
-                      if (s) {
-                        if (s.category_id != null) {
-                          navigate(`/transactions?category_id=${s.category_id}`);
-                        } else {
-                          navigate('/transactions?uncategorized=true');
+      {/* Spending by Category — Overall & Last Month */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {!spendingLoading && spending && spending.length > 0 && (
+          <div className="bg-white rounded-lg border p-6">
+            <h2 className="text-lg font-semibold mb-4">Spending by Category</h2>
+            <div className="flex flex-col items-center gap-4">
+              <div>
+                <PieChart width={224} height={224}>
+                    <Pie
+                      data={spending}
+                      dataKey="total"
+                      nameKey="category_name"
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={90}
+                      style={{ cursor: 'pointer' }}
+                      onClick={(_, index) => {
+                        const s = spending[index];
+                        if (s) {
+                          if (s.category_id != null) {
+                            navigate(`/transactions?category_id=${s.category_id}`);
+                          } else {
+                            navigate('/transactions?uncategorized=true');
+                          }
                         }
+                      }}
+                    >
+                      {spending.map((_, i) => (
+                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value: number) => `$${value.toLocaleString()}`} />
+                </PieChart>
+              </div>
+              <div className="w-full space-y-1.5">
+                {(spendingWithAvg ?? spending)?.map((s, i) => (
+                  <div
+                    key={s.category_name}
+                    className="flex items-center justify-between text-sm cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1"
+                    onClick={() => {
+                      if (s.category_id != null) {
+                        navigate(`/transactions?category_id=${s.category_id}`);
+                      } else {
+                        navigate('/transactions?uncategorized=true');
                       }
                     }}
                   >
-                    {spending.map((_, i) => (
-                      <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value: number) => `$${value.toLocaleString()}`} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="flex-1 space-y-2">
-              {(spendingWithAvg ?? spending)?.map((s, i) => (
-                <div
-                  key={s.category_name}
-                  className="flex items-center justify-between text-sm cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1"
-                  onClick={() => {
-                    if (s.category_id != null) {
-                      navigate(`/transactions?category_id=${s.category_id}`);
-                    } else {
-                      navigate('/transactions?uncategorized=true');
-                    }
-                  }}
-                >
-                  <div className="flex items-center gap-2">
-                    <div
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: COLORS[i % COLORS.length] }}
-                    />
-                    <span>{s.category_name}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="font-medium">
-                      ${Number(s.total).toLocaleString('en-HK', { minimumFractionDigits: 2 })}
-                    </span>
-                    {'monthly_avg' in s && (
-                      <span className="text-gray-400 text-xs ml-2">
-                        ${(s as { monthly_avg: number }).monthly_avg.toLocaleString('en-HK', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}/mo
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-3 h-3 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: COLORS[i % COLORS.length] }}
+                      />
+                      <span>{s.category_name}</span>
+                    </div>
+                    <div className="text-right whitespace-nowrap">
+                      <span className="font-medium">
+                        ${Number(s.total).toLocaleString('en-HK', { minimumFractionDigits: 2 })}
                       </span>
-                    )}
-                    <span className="text-gray-400 ml-1">({s.count})</span>
+                      {'monthly_avg' in s && (
+                        <span className="text-gray-400 text-xs ml-2">
+                          ${(s as { monthly_avg: number }).monthly_avg.toLocaleString('en-HK', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}/mo
+                        </span>
+                      )}
+                      <span className="text-gray-400 ml-1">({s.count})</span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {lastMonthSpending && lastMonthSpending.length > 0 && (
+          <div className="bg-white rounded-lg border p-6">
+            <h2 className="text-lg font-semibold mb-4">Last Month ({lastMonthParams.label})</h2>
+            <div className="flex flex-col items-center gap-4">
+              <div>
+                <PieChart width={224} height={224}>
+                    <Pie
+                      data={lastMonthSpending}
+                      dataKey="total"
+                      nameKey="category_name"
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={90}
+                      style={{ cursor: 'pointer' }}
+                      onClick={(_, index) => {
+                        const s = lastMonthSpending[index];
+                        if (s) {
+                          if (s.category_id != null) {
+                            navigate(`/transactions?category_id=${s.category_id}&start_date=${lastMonthParams.start_date}&end_date=${lastMonthParams.end_date}`);
+                          } else {
+                            navigate(`/transactions?uncategorized=true&start_date=${lastMonthParams.start_date}&end_date=${lastMonthParams.end_date}`);
+                          }
+                        }
+                      }}
+                    >
+                      {lastMonthSpending.map((_, i) => (
+                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value: number) => `$${value.toLocaleString()}`} />
+                </PieChart>
+              </div>
+              <div className="w-full space-y-1.5">
+                {lastMonthSpending.map((s, i) => (
+                  <div
+                    key={s.category_name}
+                    className="flex items-center justify-between text-sm cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1"
+                    onClick={() => {
+                      if (s.category_id != null) {
+                        navigate(`/transactions?category_id=${s.category_id}&start_date=${lastMonthParams.start_date}&end_date=${lastMonthParams.end_date}`);
+                      } else {
+                        navigate(`/transactions?uncategorized=true&start_date=${lastMonthParams.start_date}&end_date=${lastMonthParams.end_date}`);
+                      }
+                    }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-3 h-3 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: COLORS[i % COLORS.length] }}
+                      />
+                      <span>{s.category_name}</span>
+                    </div>
+                    <div className="text-right whitespace-nowrap">
+                      <span className="font-medium">
+                        ${Number(s.total).toLocaleString('en-HK', { minimumFractionDigits: 2 })}
+                      </span>
+                      <span className="text-gray-400 ml-1">({s.count})</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {summary && summary.balances.length === 0 && (
         <p className="text-gray-500 text-center py-12">
