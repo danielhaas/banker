@@ -5,6 +5,7 @@ import DashboardPage from './pages/DashboardPage';
 import TransactionsPage from './pages/TransactionsPage';
 import ImportPage from './pages/ImportPage';
 import StatementsPage from './pages/StatementsPage';
+import RulesPage from './pages/RulesPage';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000 } },
@@ -20,6 +21,7 @@ export default function App() {
             <Route path="/transactions" element={<TransactionsPage />} />
             <Route path="/import" element={<ImportPage />} />
             <Route path="/statements" element={<StatementsPage />} />
+            <Route path="/rules" element={<RulesPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

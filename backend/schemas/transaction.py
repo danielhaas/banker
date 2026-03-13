@@ -17,6 +17,7 @@ class TransactionOut(BaseModel):
     category_source: str | None
     category_confidence: float | None
     category_name: str | None = None
+    transfer_pair_id: int | None = None
 
     model_config = {"from_attributes": True}
 
@@ -24,6 +25,7 @@ class TransactionOut(BaseModel):
 class TransactionUpdate(BaseModel):
     category_id: int | None = None
     category_source: str = "manual"
+    is_transfer: bool | None = None
 
 
 class TransactionPreview(BaseModel):

@@ -2,12 +2,12 @@ from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
 from backend.models import Account, Bank, Category, Transaction
-from backend.schemas.dashboard import AccountBalance, DashboardSummary, SpendingByCategory
+from backend.schemas.dashboard import AccountBalance, DashboardSummary, MonthlyFlow, SpendingByCategory
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -78,6 +78,13 @@ async def spending(
             func.count().label("count"),
         )
         .where(Transaction.amount < 0)  # Only spending (negative amounts)
+        .where(Transaction.transfer_pair_id.is_(None))  # Exclude transfers
+        .where(
+            (Transaction.category_id.is_(None))
+            | ~Transaction.category_id.in_(
+                select(Category.id).where(Category.name == "Transfer")
+            )
+        )
         .group_by(Transaction.category_id)
     )
 
@@ -112,3 +119,43 @@ async def spending(
         )
 
     return sorted(spending_list, key=lambda x: x.total, reverse=True)
+
+
+@router.get("/monthly-flow", response_model=list[MonthlyFlow])
+async def monthly_flow(
+    account_id: int | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Income and expense totals per month, excluding internal transfers."""
+    stmt = select(
+            func.strftime("%Y-%m", Transaction.date).label("month"),
+            func.sum(
+                case(
+                    (Transaction.amount > 0, Transaction.amount),
+                    else_=0,
+                )
+            ).label("income"),
+            func.sum(
+                case(
+                    (Transaction.amount < 0, Transaction.amount),
+                    else_=0,
+                )
+            ).label("expense"),
+    ).where(Transaction.transfer_pair_id.is_(None))
+
+    if account_id is not None:
+        stmt = stmt.where(Transaction.account_id == account_id)
+    if start_date is not None:
+        stmt = stmt.where(Transaction.date >= start_date)
+    if end_date is not None:
+        stmt = stmt.where(Transaction.date <= end_date)
+
+    stmt = stmt.group_by("month").order_by("month")
+    result = await db.execute(stmt)
+    rows = result.all()
+    return [
+        MonthlyFlow(month=r.month, income=r.income, expense=abs(r.expense))
+        for r in rows
+    ]

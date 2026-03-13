@@ -35,6 +35,7 @@ export interface Transaction {
   category_source: string | null;
   category_confidence: number | null;
   category_name: string | null;
+  transfer_pair_id: number | null;
 }
 
 export interface TransactionPreview {
@@ -93,6 +94,20 @@ export interface StatementImport {
   transaction_count: number;
   stored_path: string | null;
   created_at: string;
+}
+
+export interface MonthlyFlow {
+  month: string;
+  income: number;
+  expense: number;
+}
+
+export interface CategoryRule {
+  id: number;
+  pattern: string;
+  category_id: number;
+  category_name: string | null;
+  priority: number;
 }
 
 export interface AccountCoverage {

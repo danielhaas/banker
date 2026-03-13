@@ -6,7 +6,7 @@ from sqlalchemy import text
 
 from backend.database import async_session, engine
 from backend.models import Base
-from backend.routers import accounts, categories, dashboard, statements, transactions
+from backend.routers import accounts, categories, dashboard, rules, statements, transactions
 from backend.services.seed import seed_categories
 
 
@@ -40,6 +40,7 @@ app.include_router(transactions.router)
 app.include_router(accounts.router)
 app.include_router(categories.router)
 app.include_router(dashboard.router)
+app.include_router(rules.router)
 
 
 @app.get("/api/health")

@@ -26,6 +26,9 @@ class Transaction(Base, TimestampMixin):
     statement_import_id: Mapped[int | None] = mapped_column(
         ForeignKey("statement_imports.id"), nullable=True
     )
+    transfer_pair_id: Mapped[int | None] = mapped_column(
+        ForeignKey("transactions.id"), nullable=True
+    )  # links to the matching transaction in another account
 
     account: Mapped["Account"] = relationship(back_populates="transactions")
     category: Mapped["Category | None"] = relationship(back_populates="transactions")

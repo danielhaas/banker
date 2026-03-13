@@ -23,3 +23,9 @@ class SpendingByCategory(BaseModel):
     category_name: str
     total: Decimal
     count: int
+
+
+class MonthlyFlow(BaseModel):
+    month: str  # YYYY-MM
+    income: Decimal
+    expense: Decimal

@@ -43,6 +43,13 @@ export function useDashboardSummary() {
   });
 }
 
+export function useMonthlyFlow(params?: Parameters<typeof api.getMonthlyFlow>[0]) {
+  return useQuery({
+    queryKey: ['monthly-flow', params],
+    queryFn: () => api.getMonthlyFlow(params),
+  });
+}
+
 export function useSpending(params?: Parameters<typeof api.getSpending>[0]) {
   return useQuery({
     queryKey: ['spending', params],
@@ -68,10 +75,80 @@ export function useConfirmImport() {
   });
 }
 
+export function useDeduplicateTransactions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.deduplicateTransactions,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['transactions'] });
+      qc.invalidateQueries({ queryKey: ['dashboard-summary'] });
+    },
+  });
+}
+
+export function useDetectTransfers() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.detectTransfers,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['transactions'] });
+    },
+  });
+}
+
+export function useRules() {
+  return useQuery({
+    queryKey: ['rules'],
+    queryFn: api.getRules,
+  });
+}
+
+export function useCreateRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.createRule,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['rules'] });
+    },
+  });
+}
+
+export function useUpdateRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: number; pattern: string; category_id: number; priority?: number }) =>
+      api.updateRule(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['rules'] });
+    },
+  });
+}
+
+export function useDeleteRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.deleteRule,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['rules'] });
+    },
+  });
+}
+
+export function useApplyRules() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.applyRules,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['transactions'] });
+      qc.invalidateQueries({ queryKey: ['spending'] });
+    },
+  });
+}
+
 export function useUpdateTransaction() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: number; category_id: number; category_source?: string }) =>
+    mutationFn: ({ id, ...data }: { id: number; category_id?: number; category_source?: string; is_transfer?: boolean }) =>
       api.updateTransaction(id, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['transactions'] });
