@@ -22,16 +22,24 @@ async def summary(db: AsyncSession = Depends(get_db)):
     net_worth_hkd = Decimal(0)
 
     for account in accounts:
-        # Get most recent transaction with a balance
-        txn_result = await db.execute(
-            select(Transaction)
-            .where(Transaction.account_id == account.id)
-            .where(Transaction.balance_after.is_not(None))
-            .order_by(Transaction.date.desc(), Transaction.id.desc())
-            .limit(1)
-        )
-        latest = txn_result.scalar_one_or_none()
-        balance = latest.balance_after if latest else Decimal(0)
+        if account.account_type == "credit_card":
+            # Credit cards: balance = sum of all transactions (negative = owed)
+            bal_result = await db.execute(
+                select(func.sum(Transaction.amount))
+                .where(Transaction.account_id == account.id)
+            )
+            balance = bal_result.scalar() or Decimal(0)
+        else:
+            # Bank accounts: use balance_after from most recent transaction
+            txn_result = await db.execute(
+                select(Transaction)
+                .where(Transaction.account_id == account.id)
+                .where(Transaction.balance_after.is_not(None))
+                .order_by(Transaction.date.desc(), Transaction.id.desc())
+                .limit(1)
+            )
+            latest = txn_result.scalar_one_or_none()
+            balance = latest.balance_after if latest else Decimal(0)
 
         # Load bank name
         bank_result = await db.execute(select(Bank).where(Bank.id == account.bank_id))

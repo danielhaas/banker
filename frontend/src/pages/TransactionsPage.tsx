@@ -1,11 +1,21 @@
 import { useState } from 'react';
-import { useTransactions, useCategories, useUpdateTransaction } from '../hooks/useApi';
+import { useSearchParams } from 'react-router-dom';
+import { useTransactions, useCategories, useAccounts, useUpdateTransaction } from '../hooks/useApi';
 
 export default function TransactionsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const accountId = searchParams.get('account_id') ? Number(searchParams.get('account_id')) : undefined;
   const [search, setSearch] = useState('');
-  const { data: transactions, isLoading } = useTransactions({ search: search || undefined, limit: 200 });
+  const { data: transactions, isLoading } = useTransactions({
+    account_id: accountId,
+    search: search || undefined,
+    limit: 200,
+  });
   const { data: categories } = useCategories();
+  const { data: accounts } = useAccounts();
   const updateTxn = useUpdateTransaction();
+
+  const currentAccount = accounts?.find((a) => a.id === accountId);
 
   const parentCategories = categories?.filter((c) => c.parent_id === null) ?? [];
 
@@ -17,14 +27,38 @@ export default function TransactionsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Transactions</h1>
-        <input
-          type="text"
-          placeholder="Search..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="border rounded-lg px-3 py-1.5 text-sm w-64"
-        />
+        <h1 className="text-2xl font-bold text-gray-900">
+          Transactions
+          {currentAccount && (
+            <span className="text-lg font-normal text-gray-500 ml-2">— {currentAccount.name}</span>
+          )}
+        </h1>
+        <div className="flex items-center gap-2">
+          <select
+            value={accountId ?? ''}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (val) {
+                setSearchParams({ account_id: val });
+              } else {
+                setSearchParams({});
+              }
+            }}
+            className="border rounded-lg px-3 py-1.5 text-sm"
+          >
+            <option value="">All accounts</option>
+            {accounts?.map((a) => (
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </select>
+          <input
+            type="text"
+            placeholder="Search..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="border rounded-lg px-3 py-1.5 text-sm w-64"
+          />
+        </div>
       </div>
 
       {isLoading ? (

@@ -1,9 +1,11 @@
+import { useNavigate } from 'react-router-dom';
 import { useDashboardSummary, useSpending } from '../hooks/useApi';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
 const COLORS = ['#ef4444', '#3b82f6', '#ec4899', '#f59e0b', '#a855f7', '#10b981', '#6b7280', '#14b8a6'];
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
   const { data: summary, isLoading: summaryLoading } = useDashboardSummary();
   const { data: spending, isLoading: spendingLoading } = useSpending();
 
@@ -27,7 +29,11 @@ export default function DashboardPage() {
       {summary && summary.balances.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {summary.balances.map((b) => (
-            <div key={b.account_id} className="bg-white rounded-lg border p-4">
+            <div
+              key={b.account_id}
+              className="bg-white rounded-lg border p-4 cursor-pointer hover:border-blue-300 hover:shadow-sm transition-all"
+              onClick={() => navigate(`/transactions?account_id=${b.account_id}`)}
+            >
               <div className="flex items-center justify-between">
                 <p className="text-sm text-gray-500">{b.bank_name}</p>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 capitalize">
